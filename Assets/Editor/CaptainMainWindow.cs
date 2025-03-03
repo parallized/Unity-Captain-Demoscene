@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Assets.Editor;
 using UnityEditor;
@@ -7,6 +8,7 @@ using UnityEngine.UIElements;
 using UnityEngine.UIElements.Experimental;
 
 using static Assets.Editor.CaptainMainElements;
+using Image = UnityEngine.UIElements.Image;
 enum MessageSender
 {
     OPENAI, USER
@@ -14,7 +16,16 @@ enum MessageSender
 
 public class CaptainMainWindow : EditorWindow
 {
+    // file patching
+    private string fileContent;
+    private string fileTitle;
+    private Label fileNameLabel;
+    private Image fileStatusIcon;
+
+    // chat view
     private ScrollView historyChatView;
+
+    // chat send
     private TextField chatInputField;
     private UnityEngine.UIElements.Button sendButton;
 
@@ -50,21 +61,55 @@ public class CaptainMainWindow : EditorWindow
         chatInputContainer.style.paddingBottom = 5;
         rootVisualElement.Add(chatInputContainer);
 
+        ScrollView chatInputScrollView = new ScrollView();
+        chatInputScrollView.style.flexGrow = 1;
+        chatInputScrollView.style.height = 50;
+        chatInputContainer.Add(chatInputScrollView);
+
         chatInputField = new TextField();
         chatInputField.style.flexGrow = 1;
-        chatInputField.style.minHeight = 50;
-        chatInputField.style.maxHeight = 100;
+        chatInputField.style.minHeight = 82;
         chatInputField.multiline = true;
-        chatInputContainer.Add(chatInputField);
+        chatInputScrollView.Add(chatInputField);
+
+        VisualElement buttonContainer = new VisualElement();
+        buttonContainer.style.flexDirection = FlexDirection.Row;
+        buttonContainer.style.justifyContent = Justify.FlexStart;
+        buttonContainer.style.alignItems = Align.Center;
+        chatInputContainer.Add(buttonContainer);
 
         sendButton = new UnityEngine.UIElements.Button();
-        sendButton.text = "Send to captain!";
+        sendButton.text = "Send";
         sendButton.style.flexGrow = 0;
         sendButton.style.maxWidth = 120;
         sendButton.style.paddingLeft = 15;
         sendButton.style.paddingRight = 15;
         sendButton.clicked += OnSendButtonClicked;
-        chatInputContainer.Add(sendButton);
+        buttonContainer.Add(sendButton);
+
+        UnityEngine.UIElements.Button filePickerButton = new UnityEngine.UIElements.Button();
+        filePickerButton.text = "Provide a schema file";
+        filePickerButton.style.flexGrow = 0;
+        filePickerButton.style.maxWidth = 150;
+        filePickerButton.style.paddingLeft = 15;
+        filePickerButton.style.paddingRight = 15;
+        filePickerButton.clicked += OnFilePickerButtonClicked;
+        buttonContainer.Add(filePickerButton);
+
+        fileStatusIcon = new Image();
+        fileStatusIcon.image = LoadIcon("Assets/Editor/Icons/gray-dot.png");
+        fileStatusIcon.style.width = 6;
+        fileStatusIcon.style.height = 6;
+        fileStatusIcon.style.marginLeft = 4;
+        fileStatusIcon.style.marginTop = 2;
+        fileStatusIcon.style.marginRight = 2;
+        fileStatusIcon.style.marginBottom = 2;
+        buttonContainer.Add(fileStatusIcon);
+
+        fileNameLabel = new Label();
+        fileNameLabel.text = "no file selected";
+        fileNameLabel.style.opacity = 0.5f;
+        buttonContainer.Add(fileNameLabel);
     }
 
     private async void OnSendButtonClicked()
@@ -76,12 +121,40 @@ public class CaptainMainWindow : EditorWindow
             sendButton.text = "Please wait...";
             AddMessage(message, MessageSender.USER);
 
-            var response = await CaptainProxy.InvokeCaptainAskAsync(message);
-            AddMessage(response.Content, MessageSender.OPENAI);
+            if (fileContent != null)
+            {
+                var invokeMessage = InvokeFormat.MergeSchemaMessage(fileContent, message);
+                var response = await CaptainProxy.InvokeCaptainAskAsync(invokeMessage);
+                AddMessage(response.Content, MessageSender.OPENAI);
+            }
+            else
+            {
+                var response = await CaptainProxy.InvokeCaptainAskAsync(message);
+                AddMessage(response.Content, MessageSender.OPENAI);
+            }
 
             sendButton.SetEnabled(true);
-            sendButton.text = "Send to captain!";
+            sendButton.text = "Send";
         };
+    }
+    private void OnFilePickerButtonClicked()
+    {
+        string path = EditorUtility.OpenFilePanel("Select File", "", "txt");
+        if (!string.IsNullOrEmpty(path))
+        {
+            fileTitle = System.IO.Path.GetFileName(path);
+            fileContent = System.IO.File.ReadAllText(path);
+
+            if (fileContent.Length > 3000)
+            {
+                Debug.Log("the schema file provided was too large, please check if selected file is correct.");
+                return;
+            }
+
+            fileNameLabel.text = fileTitle;
+            fileNameLabel.style.opacity = 1;
+            fileStatusIcon.image = LoadIcon("Assets/Editor/Icons/green-dot.png");
+        }
     }
 
     private async void AddMessage(string msg, MessageSender sender)
@@ -91,63 +164,27 @@ public class CaptainMainWindow : EditorWindow
         lineContainer.style.justifyContent = sender == MessageSender.OPENAI ? Justify.FlexStart : Justify.FlexEnd;
         historyChatView.Add(lineContainer);
 
-        VisualElement lineContent = new VisualElement();
-        lineContent.style.flexDirection = FlexDirection.Column;
-        
-        lineContent.style.borderTopLeftRadius = 5;
-        lineContent.style.borderTopRightRadius = 5;
-        lineContent.style.borderBottomLeftRadius = 5;
-        lineContent.style.borderBottomRightRadius = 5;
-        lineContent.style.borderTopWidth = 1;
-        lineContent.style.borderRightWidth = 1;
-        lineContent.style.borderBottomWidth = 1;
-        lineContent.style.borderLeftWidth = 1;
-
-        Color borderColor = sender == MessageSender.OPENAI ? new Color(0.2f, 0.2f, 0.2f) : new Color(0.5f, 0.5f, 0.5f);
-        lineContent.style.borderTopColor = borderColor;
-        lineContent.style.borderRightColor = borderColor;
-        lineContent.style.borderBottomColor = borderColor;
-        lineContent.style.borderLeftColor = borderColor;
-        lineContent.style.paddingTop = 5;
-        lineContent.style.paddingBottom = 5;
-        lineContent.style.paddingLeft = 10;
-        lineContent.style.paddingRight = 10;
-        lineContent.style.maxWidth = new StyleLength(new Length(70, LengthUnit.Percent));
-        lineContent.style.marginTop = 5;
-        lineContent.style.marginBottom = 5;
-        lineContent.style.marginLeft = 5;
-        lineContent.style.marginRight = 5;
-        lineContent.style.backgroundColor = sender == MessageSender.OPENAI ? new Color(0.2f, 0.2f, 0.2f) : new Color(0.3f, 0.3f, 0.3f);
-        lineContent.style.opacity = 0;
-        if (sender == MessageSender.OPENAI)
-        {
-            lineContent.style.marginLeft = 80;
-        }
-        else
-        {
-            lineContent.style.marginRight = 80;
-        }
+        VisualElement Bobble = CaptainMainElements.CreateBobble(sender);
 
         var userBadge = CaptainMainElements.CreateUserBadge(sender);
         var msgLabel = CaptainMainElements.CreateMsgLabel(msg);
 
-        lineContent.Add(userBadge);
-        lineContent.Add(msgLabel);
-        lineContainer.Add(lineContent);
+        Bobble.Add(userBadge);
+        Bobble.Add(msgLabel);
+        lineContainer.Add(Bobble);
         chatInputField.value = string.Empty;
 
         // label animate
         await Task.Delay(33);
         if (sender == MessageSender.OPENAI)
         {
-            lineContent.experimental.animation.Start(new StyleValues { opacity = 1, marginLeft = 5 }, 500);
+            Bobble.experimental.animation.Start(new StyleValues { opacity = 1, marginLeft = 5 }, 500);
         }
         else
         {
-            lineContent.experimental.animation.Start(new StyleValues { opacity = 1, marginRight = 5 }, 500);
+            Bobble.experimental.animation.Start(new StyleValues { opacity = 1, marginRight = 5 }, 500);
         }
     }
-
 
     private static Texture2D LoadIcon(string path)
     {
